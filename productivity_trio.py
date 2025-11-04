@@ -10,7 +10,7 @@ import sqlite3
 import json
 import os
 from datetime import datetime
-from threading import Thread
+from threading import Thread, Lock
 from pathlib import Path
 import sys
 
@@ -112,8 +112,11 @@ Remember: Done is better than perfect. Momentum beats perfection."""
         
     def init_database(self):
         """Initialize SQLite database with schema"""
-        self.conn = sqlite3.connect(DB_NAME)
+        # Allow SQLite to be accessed from multiple threads
+        self.conn = sqlite3.connect(DB_NAME, check_same_thread=False)
         self.cursor = self.conn.cursor()
+        # Create a lock for thread-safe database access
+        self.db_lock = Lock()
         
         # Projects table
         self.cursor.execute('''
@@ -406,19 +409,20 @@ Remember: Done is better than perfect. Momentum beats perfection."""
             title = title_entry.get().strip()
             description = desc_text.get("1.0", tk.END).strip()
             enthusiasm = int(enthusiasm_var.get())
-            
+
             if not title:
                 messagebox.showwarning("Validation", "Please enter a project title.")
                 return
-            
-            self.cursor.execute('''
-                INSERT INTO projects (title, description, initial_enthusiasm)
-                VALUES (?, ?, ?)
-            ''', (title, description, enthusiasm))
-            self.conn.commit()
-            
-            project_id = self.cursor.lastrowid
-            self.current_project_id = project_id
+
+            with self.db_lock:
+                self.cursor.execute('''
+                    INSERT INTO projects (title, description, initial_enthusiasm)
+                    VALUES (?, ?, ?)
+                ''', (title, description, enthusiasm))
+                self.conn.commit()
+
+                project_id = self.cursor.lastrowid
+                self.current_project_id = project_id
             
             # Add initial conversation with both agents
             welcome_msg = f"New project started: {title}"
@@ -632,15 +636,16 @@ Help break this down into the first tiny actionable steps."""
             content = capture_text.get("1.0", tk.END).strip()
             if content:
                 # Save as insight
-                self.cursor.execute('''
-                    INSERT INTO insights (project_id, insight_type, content)
-                    VALUES (?, ?, ?)
-                ''', (self.current_project_id, "capture", content))
-                self.conn.commit()
-                
+                with self.db_lock:
+                    self.cursor.execute('''
+                        INSERT INTO insights (project_id, insight_type, content)
+                        VALUES (?, ?, ?)
+                    ''', (self.current_project_id, "capture", content))
+                    self.conn.commit()
+
                 # Send to Spark for processing
                 self.send_to_agent("spark", f"Quick capture: {content}", auto=True)
-                
+
                 self.update_insights_display()
                 messagebox.showinfo("Saved", "Your thoughts have been captured!")
                 dialog.destroy()
@@ -713,33 +718,36 @@ Help break this down into the first tiny actionable steps."""
     
     def save_conversation(self, project_id, agent, message):
         """Save conversation to database"""
-        self.cursor.execute('''
-            INSERT INTO conversations (project_id, agent, message)
-            VALUES (?, ?, ?)
-        ''', (project_id, agent, message))
-        self.conn.commit()
+        with self.db_lock:
+            self.cursor.execute('''
+                INSERT INTO conversations (project_id, agent, message)
+                VALUES (?, ?, ?)
+            ''', (project_id, agent, message))
+            self.conn.commit()
     
     def get_conversation_history(self, project_id, agent_id, limit=10):
         """Get conversation history"""
-        self.cursor.execute('''
-            SELECT timestamp, agent, message 
-            FROM conversations 
-            WHERE project_id = ? AND (agent = ? OR agent = 'user')
-            ORDER BY timestamp DESC 
-            LIMIT ?
-        ''', (project_id, agent_id, limit))
-        
-        return list(reversed(self.cursor.fetchall()))
+        with self.db_lock:
+            self.cursor.execute('''
+                SELECT timestamp, agent, message
+                FROM conversations
+                WHERE project_id = ? AND (agent = ? OR agent = 'user')
+                ORDER BY timestamp DESC
+                LIMIT ?
+            ''', (project_id, agent_id, limit))
+
+            return list(reversed(self.cursor.fetchall()))
     
     def update_project_activity(self):
         """Update last activity timestamp"""
         if self.current_project_id:
-            self.cursor.execute('''
-                UPDATE projects 
-                SET last_activity = CURRENT_TIMESTAMP 
-                WHERE id = ?
-            ''', (self.current_project_id,))
-            self.conn.commit()
+            with self.db_lock:
+                self.cursor.execute('''
+                    UPDATE projects
+                    SET last_activity = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                ''', (self.current_project_id,))
+                self.conn.commit()
     
     def load_project_info(self):
         """Load and display current project info"""
@@ -747,14 +755,16 @@ Help break this down into the first tiny actionable steps."""
             self.project_title_label.config(text="No project selected")
             self.project_status_label.config(text="")
             return
-        
-        self.cursor.execute('''
-            SELECT title, created_at, last_activity, status 
-            FROM projects 
-            WHERE id = ?
-        ''', (self.current_project_id,))
-        
-        result = self.cursor.fetchone()
+
+        with self.db_lock:
+            self.cursor.execute('''
+                SELECT title, created_at, last_activity, status
+                FROM projects
+                WHERE id = ?
+            ''', (self.current_project_id,))
+
+            result = self.cursor.fetchone()
+
         if result:
             title, created, last_activity, status = result
             self.project_title_label.config(text=title)
@@ -764,49 +774,52 @@ Help break this down into the first tiny actionable steps."""
         """Update statistics display"""
         if not self.current_project_id:
             return
-        
-        # Get project count
-        self.cursor.execute('SELECT COUNT(*) FROM projects')
-        project_count = self.cursor.fetchone()[0]
-        
-        # Get message count for current project
-        self.cursor.execute('''
-            SELECT COUNT(*) FROM conversations WHERE project_id = ?
-        ''', (self.current_project_id,))
-        message_count = self.cursor.fetchone()[0]
-        
-        # Get task count
-        self.cursor.execute('''
-            SELECT COUNT(*) FROM tasks WHERE project_id = ? AND completed = 0
-        ''', (self.current_project_id,))
-        task_count = self.cursor.fetchone()[0]
-        
+
+        with self.db_lock:
+            # Get project count
+            self.cursor.execute('SELECT COUNT(*) FROM projects')
+            project_count = self.cursor.fetchone()[0]
+
+            # Get message count for current project
+            self.cursor.execute('''
+                SELECT COUNT(*) FROM conversations WHERE project_id = ?
+            ''', (self.current_project_id,))
+            message_count = self.cursor.fetchone()[0]
+
+            # Get task count
+            self.cursor.execute('''
+                SELECT COUNT(*) FROM tasks WHERE project_id = ? AND completed = 0
+            ''', (self.current_project_id,))
+            task_count = self.cursor.fetchone()[0]
+
         stats_text = f"""Total Projects: {project_count}
 Messages: {message_count}
 Active Tasks: {task_count}
 
 Team formed: {datetime.now().strftime('%Y-%m-%d')}
 """
-        
+
         self.stats_label.config(text=stats_text)
     
     def update_insights_display(self):
         """Update insights display"""
         self.insights_display.config(state=tk.NORMAL)
         self.insights_display.delete("1.0", tk.END)
-        
+
         if self.current_project_id:
-            self.cursor.execute('''
-                SELECT content, timestamp FROM insights 
-                WHERE project_id = ?
-                ORDER BY timestamp DESC LIMIT 5
-            ''', (self.current_project_id,))
-            
-            insights = self.cursor.fetchall()
+            with self.db_lock:
+                self.cursor.execute('''
+                    SELECT content, timestamp FROM insights
+                    WHERE project_id = ?
+                    ORDER BY timestamp DESC LIMIT 5
+                ''', (self.current_project_id,))
+
+                insights = self.cursor.fetchall()
+
             for content, timestamp in insights:
                 time_str = datetime.fromisoformat(timestamp).strftime("%m/%d %H:%M")
                 self.insights_display.insert(tk.END, f"[{time_str}]\n{content}\n\n")
-        
+
         self.insights_display.config(state=tk.DISABLED)
     
     def update_status(self, message):
@@ -817,9 +830,10 @@ Team formed: {datetime.now().strftime('%Y-%m-%d')}
     def load_initial_state(self):
         """Load initial state on app start"""
         # Check if there are any projects
-        self.cursor.execute('SELECT id FROM projects ORDER BY last_activity DESC LIMIT 1')
-        result = self.cursor.fetchone()
-        
+        with self.db_lock:
+            self.cursor.execute('SELECT id FROM projects ORDER BY last_activity DESC LIMIT 1')
+            result = self.cursor.fetchone()
+
         if result:
             self.current_project_id = result[0]
             self.load_project_info()
@@ -828,7 +842,7 @@ Team formed: {datetime.now().strftime('%Y-%m-%d')}
         else:
             # Welcome message
             if self.client:
-                messagebox.showinfo("Welcome!", 
+                messagebox.showinfo("Welcome!",
                     "Welcome to ADHD Productivity Trio!\n\n" +
                     "Let's create your first project and meet your AI team members:\n" +
                     "✨ Spark (Motivator) and 🎯 Proto (Executor)\n\n" +
@@ -896,15 +910,18 @@ Team formed: {datetime.now().strftime('%Y-%m-%d')}
         tree.heading("Last Activity", text="Last Activity")
         
         tree.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        
+
         # Load projects
-        self.cursor.execute('''
-            SELECT id, title, status, created_at, last_activity 
-            FROM projects 
-            ORDER BY last_activity DESC
-        ''')
-        
-        for row in self.cursor.fetchall():
+        with self.db_lock:
+            self.cursor.execute('''
+                SELECT id, title, status, created_at, last_activity
+                FROM projects
+                ORDER BY last_activity DESC
+            ''')
+
+            rows = self.cursor.fetchall()
+
+        for row in rows:
             pid, title, status, created, last_activity = row
             tree.insert("", tk.END, values=(title, status, created[:10], last_activity[:10]))
         
@@ -919,16 +936,19 @@ Team formed: {datetime.now().strftime('%Y-%m-%d')}
         
         text = scrolledtext.ScrolledText(dialog, wrap=tk.WORD)
         text.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        
+
         # Load all insights
-        self.cursor.execute('''
-            SELECT content, timestamp, insight_type 
-            FROM insights 
-            ORDER BY timestamp DESC 
-            LIMIT 50
-        ''')
-        
-        for content, timestamp, itype in self.cursor.fetchall():
+        with self.db_lock:
+            self.cursor.execute('''
+                SELECT content, timestamp, insight_type
+                FROM insights
+                ORDER BY timestamp DESC
+                LIMIT 50
+            ''')
+
+            insights = self.cursor.fetchall()
+
+        for content, timestamp, itype in insights:
             time_str = datetime.fromisoformat(timestamp).strftime("%Y-%m-%d %H:%M")
             text.insert(tk.END, f"[{time_str}] ({itype})\n{content}\n\n")
         
