@@ -13,34 +13,50 @@ from datetime import datetime
 from threading import Thread, Lock
 from pathlib import Path
 import sys
+from typing import Dict, List, Optional, Tuple, Any
 
 # Constants
-APP_VERSION = "1.0.0"
-APP_NAME = "ADHD Productivity Trio"
-DB_NAME = "productivity_trio.db"
-CONFIG_FILE = "config.json"
+APP_VERSION: str = "1.0.0"
+APP_NAME: str = "ADHD Productivity Trio"
+DB_NAME: str = "productivity_trio.db"
+CONFIG_FILE: str = "config.json"
 
 class ProductivityTrioApp:
-    def __init__(self, root):
-        self.root = root
+    def __init__(self, root: tk.Tk) -> None:
+        self.root: tk.Tk = root
         self.root.title(f"{APP_NAME} v{APP_VERSION}")
         self.root.geometry("1400x900")
-        
+
+        # Database attributes
+        self.conn: sqlite3.Connection
+        self.cursor: sqlite3.Cursor
+        self.db_lock: Lock
+
         # Initialize database
         self.init_database()
-        
+
         # Load configuration
-        self.config = self.load_config()
-        
+        self.config: Dict[str, Any] = self.load_config()
+
         # Initialize Claude client
-        self.client = None
+        self.client: Optional[anthropic.Anthropic] = None
         self.init_claude_client()
-        
+
         # Current project
-        self.current_project_id = None
-        
+        self.current_project_id: Optional[int] = None
+
+        # UI components
+        self.project_title_label: ttk.Label
+        self.project_status_label: ttk.Label
+        self.tasks_listbox: tk.Listbox
+        self.notebook: ttk.Notebook
+        self.agent_tabs: Dict[str, Dict[str, Any]]
+        self.stats_label: ttk.Label
+        self.insights_display: scrolledtext.ScrolledText
+        self.status_bar: ttk.Label
+
         # Agent definitions
-        self.agents = {
+        self.agents: Dict[str, Dict[str, str]] = {
             "spark": {
                 "name": "Spark ✨",
                 "color": "#FF6B6B",
@@ -110,7 +126,7 @@ Remember: Done is better than perfect. Momentum beats perfection."""
         # Load or create initial project
         self.load_initial_state()
         
-    def init_database(self):
+    def init_database(self) -> None:
         """Initialize SQLite database with schema"""
         # Allow SQLite to be accessed from multiple threads
         self.conn = sqlite3.connect(DB_NAME, check_same_thread=False)
@@ -174,9 +190,9 @@ Remember: Done is better than perfect. Momentum beats perfection."""
         
         self.conn.commit()
         
-    def load_config(self):
+    def load_config(self) -> Dict[str, Any]:
         """Load or create configuration"""
-        default_config = {
+        default_config: Dict[str, Any] = {
             "anthropic_api_key": "",
             "model": "claude-sonnet-4-5-20250929",
             "max_tokens": 1024,
@@ -192,24 +208,24 @@ Remember: Done is better than perfect. Momentum beats perfection."""
                 json.dump(default_config, f, indent=2)
             return default_config
     
-    def save_config(self):
+    def save_config(self) -> None:
         """Save configuration to file"""
         with open(CONFIG_FILE, 'w') as f:
             json.dump(self.config, f, indent=2)
-    
-    def init_claude_client(self):
+
+    def init_claude_client(self) -> None:
         """Initialize Claude API client"""
-        api_key = self.config.get("anthropic_api_key", "")
+        api_key: str = self.config.get("anthropic_api_key", "")
         if api_key and api_key != "":
             try:
                 self.client = anthropic.Anthropic(api_key=api_key)
             except Exception as e:
                 messagebox.showerror("API Error", f"Failed to initialize Claude client: {str(e)}")
         
-    def setup_ui(self):
+    def setup_ui(self) -> None:
         """Setup the main user interface"""
         # Menu bar
-        menubar = tk.Menu(self.root)
+        menubar: tk.Menu = tk.Menu(self.root)
         self.root.config(menu=menubar)
         
         # File menu
@@ -372,9 +388,9 @@ Remember: Done is better than perfect. Momentum beats perfection."""
         self.status_bar = ttk.Label(self.root, text="Ready", relief=tk.SUNKEN, anchor=tk.W)
         self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
         
-    def create_new_project(self):
+    def create_new_project(self) -> None:
         """Create a new project"""
-        dialog = tk.Toplevel(self.root)
+        dialog: tk.Toplevel = tk.Toplevel(self.root)
         dialog.title("New Project")
         dialog.geometry("500x300")
         dialog.transient(self.root)
@@ -400,15 +416,15 @@ Remember: Done is better than perfect. Momentum beats perfection."""
         enthusiasm_label = ttk.Label(dialog, text="10")
         enthusiasm_label.pack()
         
-        def update_enthusiasm_label(*args):
+        def update_enthusiasm_label(*args: Any) -> None:
             enthusiasm_label.config(text=str(int(enthusiasm_var.get())))
-        
+
         enthusiasm_var.trace_add("write", update_enthusiasm_label)
-        
-        def save_project():
-            title = title_entry.get().strip()
-            description = desc_text.get("1.0", tk.END).strip()
-            enthusiasm = int(enthusiasm_var.get())
+
+        def save_project() -> None:
+            title: str = title_entry.get().strip()
+            description: str = desc_text.get("1.0", tk.END).strip()
+            enthusiasm: int = int(enthusiasm_var.get())
 
             if not title:
                 messagebox.showwarning("Validation", "Please enter a project title.")
@@ -461,17 +477,17 @@ Help break this down into the first tiny actionable steps."""
         ttk.Button(button_frame, text="Create Project", command=save_project).pack(side=tk.LEFT, padx=5)
         ttk.Button(button_frame, text="Cancel", command=dialog.destroy).pack(side=tk.LEFT, padx=5)
     
-    def send_message(self, agent_id):
+    def send_message(self, agent_id: str) -> None:
         """Send message to specific agent"""
         if not self.current_project_id:
             messagebox.showwarning("No Project", "Please create or select a project first.")
             return
-        
+
         if not self.client:
             messagebox.showerror("API Error", "Claude API client not initialized. Please check your API key in settings.")
             return
-        
-        message = self.agent_tabs[agent_id]["input"].get().strip()
+
+        message: str = self.agent_tabs[agent_id]["input"].get().strip()
         if not message:
             return
         
@@ -490,19 +506,19 @@ Help break this down into the first tiny actionable steps."""
         # Send to Claude in background thread
         Thread(target=self.send_to_agent, args=(agent_id, message), daemon=True).start()
     
-    def send_to_agent(self, agent_id, message, auto=False):
+    def send_to_agent(self, agent_id: str, message: str, auto: bool = False) -> None:
         """Send message to agent and get response"""
         try:
             # Get agent info
-            agent = self.agents[agent_id]
-            
+            agent: Dict[str, str] = self.agents[agent_id]
+
             # Get conversation history for context
-            history = self.get_conversation_history(self.current_project_id, agent_id, limit=10)
+            history: List[Tuple[Any, ...]] = self.get_conversation_history(self.current_project_id, agent_id, limit=10)
             
             # Build messages array
-            messages = []
+            messages: List[Dict[str, str]] = []
             for msg in history:
-                role = "user" if msg[1] == "user" else "assistant"
+                role: str = "user" if msg[1] == "user" else "assistant"
                 messages.append({"role": role, "content": msg[2]})
             
             # Add current message
@@ -520,7 +536,7 @@ Help break this down into the first tiny actionable steps."""
             )
             
             # Extract response text
-            response_text = response.content[0].text
+            response_text: str = response.content[0].text
             
             # Display agent response
             if not auto:
@@ -533,11 +549,11 @@ Help break this down into the first tiny actionable steps."""
             self.update_status("Ready")
             
         except Exception as e:
-            error_msg = f"Error communicating with {agent['name']}: {str(e)}"
+            error_msg: str = f"Error communicating with {agent['name']}: {str(e)}"
             messagebox.showerror("API Error", error_msg)
             self.update_status("Error - Check your API key")
-    
-    def ask_team(self):
+
+    def ask_team(self) -> None:
         """Send message to both agents for team discussion"""
         if not self.current_project_id:
             messagebox.showwarning("No Project", "Please create or select a project first.")
@@ -547,36 +563,36 @@ Help break this down into the first tiny actionable steps."""
             messagebox.showerror("API Error", "Claude API client not initialized.")
             return
         
-        message = self.agent_tabs["team"]["input"].get().strip()
+        message: str = self.agent_tabs["team"]["input"].get().strip()
         if not message:
             return
-        
+
         # Clear input
         self.agent_tabs["team"]["input"].delete(0, tk.END)
-        
+
         # Display user message in team chat
         self.display_message("team", "You", message, "user")
-        
+
         # Save to database
         self.save_conversation(self.current_project_id, "user", f"[TEAM] {message}")
-        
+
         # Ask both agents in sequence
         Thread(target=self.team_discussion, args=(message,), daemon=True).start()
-    
-    def team_discussion(self, message):
+
+    def team_discussion(self, message: str) -> None:
         """Facilitate team discussion between agents"""
         try:
             # Ask Spark first
             self.update_status("Asking Spark...")
-            spark_response = self.get_agent_response("spark", 
+            spark_response: str = self.get_agent_response("spark",
                 f"In a team discussion, the user asked: {message}\n\nProvide your perspective as the Motivator.")
-            
+
             self.display_message("team", "Spark ✨", spark_response, "spark")
             self.save_conversation(self.current_project_id, "spark", f"[TEAM] {spark_response}")
-            
+
             # Then ask Proto
             self.update_status("Asking Proto...")
-            proto_response = self.get_agent_response("proto", 
+            proto_response: str = self.get_agent_response("proto", 
                 f"In a team discussion, the user asked: {message}\n\nSpark's perspective: {spark_response}\n\nProvide your perspective as the Executor.")
             
             self.display_message("team", "Proto 🎯", proto_response, "proto")
@@ -587,10 +603,10 @@ Help break this down into the first tiny actionable steps."""
         except Exception as e:
             messagebox.showerror("Error", f"Team discussion error: {str(e)}")
             self.update_status("Error")
-    
-    def get_agent_response(self, agent_id, message):
+
+    def get_agent_response(self, agent_id: str, message: str) -> str:
         """Get response from agent (helper method)"""
-        agent = self.agents[agent_id]
+        agent: Dict[str, str] = self.agents[agent_id]
         
         response = self.client.messages.create(
             model=self.config["model"],
@@ -601,19 +617,19 @@ Help break this down into the first tiny actionable steps."""
         
         return response.content[0].text
     
-    def display_message(self, agent_id, sender, message, tag):
+    def display_message(self, agent_id: str, sender: str, message: str, tag: str) -> None:
         """Display message in chat window"""
-        display = self.agent_tabs[agent_id]["display"]
+        display: scrolledtext.ScrolledText = self.agent_tabs[agent_id]["display"]
         display.config(state=tk.NORMAL)
-        
-        timestamp = datetime.now().strftime("%H:%M")
+
+        timestamp: str = datetime.now().strftime("%H:%M")
         display.insert(tk.END, f"{sender} ({timestamp})\n", tag)
         display.insert(tk.END, f"{message}\n\n")
-        
+
         display.see(tk.END)
         display.config(state=tk.DISABLED)
-    
-    def quick_capture(self):
+
+    def quick_capture(self) -> None:
         """Quick capture current state"""
         if not self.current_project_id:
             messagebox.showwarning("No Project", "Please create or select a project first.")
@@ -632,8 +648,8 @@ Help break this down into the first tiny actionable steps."""
         capture_text.pack(padx=10, fill=tk.BOTH, expand=True)
         capture_text.focus()
         
-        def save_capture():
-            content = capture_text.get("1.0", tk.END).strip()
+        def save_capture() -> None:
+            content: str = capture_text.get("1.0", tk.END).strip()
             if content:
                 # Save as insight
                 with self.db_lock:
@@ -649,10 +665,10 @@ Help break this down into the first tiny actionable steps."""
                 self.update_insights_display()
                 messagebox.showinfo("Saved", "Your thoughts have been captured!")
                 dialog.destroy()
-        
+
         ttk.Button(dialog, text="Capture", command=save_capture).pack(pady=10)
-    
-    def context_recovery(self):
+
+    def context_recovery(self) -> None:
         """Help recover context when returning to project"""
         if not self.current_project_id:
             messagebox.showwarning("No Project", "Please create or select a project first.")
@@ -664,15 +680,15 @@ Help break this down into the first tiny actionable steps."""
             auto=False)
         
         self.notebook.select(1)  # Switch to Proto's tab
-    
-    def complete_task(self):
+
+    def complete_task(self) -> None:
         """Mark a task as complete"""
-        selection = self.tasks_listbox.curselection()
+        selection: Tuple[int, ...] = self.tasks_listbox.curselection()
         if not selection:
             messagebox.showinfo("No Selection", "Please select a task to complete.")
             return
-        
-        task_text = self.tasks_listbox.get(selection[0])
+
+        task_text: str = self.tasks_listbox.get(selection[0])
         
         # Simple dopamine celebration
         dialog = tk.Toplevel(self.root)
@@ -696,13 +712,13 @@ Help break this down into the first tiny actionable steps."""
         dopamine_label = ttk.Label(dialog, text="8")
         dopamine_label.pack()
         
-        def update_label(*args):
+        def update_label(*args: Any) -> None:
             dopamine_label.config(text=str(int(dopamine_var.get())))
-        
+
         dopamine_var.trace_add("write", update_label)
-        
-        def save_completion():
-            score = int(dopamine_var.get())
+
+        def save_completion() -> None:
+            score: int = int(dopamine_var.get())
             # Here you would update the task in database
             # For MVP, just remove from list
             self.tasks_listbox.delete(selection[0])
@@ -715,8 +731,8 @@ Help break this down into the first tiny actionable steps."""
             dialog.destroy()
         
         ttk.Button(dialog, text="Save", command=save_completion).pack(pady=15)
-    
-    def save_conversation(self, project_id, agent, message):
+
+    def save_conversation(self, project_id: Optional[int], agent: str, message: str) -> None:
         """Save conversation to database"""
         with self.db_lock:
             self.cursor.execute('''
@@ -724,8 +740,8 @@ Help break this down into the first tiny actionable steps."""
                 VALUES (?, ?, ?)
             ''', (project_id, agent, message))
             self.conn.commit()
-    
-    def get_conversation_history(self, project_id, agent_id, limit=10):
+
+    def get_conversation_history(self, project_id: Optional[int], agent_id: str, limit: int = 10) -> List[Tuple[Any, ...]]:
         """Get conversation history"""
         with self.db_lock:
             self.cursor.execute('''
@@ -737,8 +753,8 @@ Help break this down into the first tiny actionable steps."""
             ''', (project_id, agent_id, limit))
 
             return list(reversed(self.cursor.fetchall()))
-    
-    def update_project_activity(self):
+
+    def update_project_activity(self) -> None:
         """Update last activity timestamp"""
         if self.current_project_id:
             with self.db_lock:
@@ -748,8 +764,8 @@ Help break this down into the first tiny actionable steps."""
                     WHERE id = ?
                 ''', (self.current_project_id,))
                 self.conn.commit()
-    
-    def load_project_info(self):
+
+    def load_project_info(self) -> None:
         """Load and display current project info"""
         if not self.current_project_id:
             self.project_title_label.config(text="No project selected")
@@ -763,14 +779,18 @@ Help break this down into the first tiny actionable steps."""
                 WHERE id = ?
             ''', (self.current_project_id,))
 
-            result = self.cursor.fetchone()
+            result: Optional[Tuple[Any, ...]] = self.cursor.fetchone()
 
         if result:
+            title: str
+            created: str
+            last_activity: str
+            status: str
             title, created, last_activity, status = result
             self.project_title_label.config(text=title)
             self.project_status_label.config(text=f"Status: {status.title()}")
-    
-    def update_stats(self):
+
+    def update_stats(self) -> None:
         """Update statistics display"""
         if not self.current_project_id:
             return
@@ -778,21 +798,21 @@ Help break this down into the first tiny actionable steps."""
         with self.db_lock:
             # Get project count
             self.cursor.execute('SELECT COUNT(*) FROM projects')
-            project_count = self.cursor.fetchone()[0]
+            project_count: int = self.cursor.fetchone()[0]
 
             # Get message count for current project
             self.cursor.execute('''
                 SELECT COUNT(*) FROM conversations WHERE project_id = ?
             ''', (self.current_project_id,))
-            message_count = self.cursor.fetchone()[0]
+            message_count: int = self.cursor.fetchone()[0]
 
             # Get task count
             self.cursor.execute('''
                 SELECT COUNT(*) FROM tasks WHERE project_id = ? AND completed = 0
             ''', (self.current_project_id,))
-            task_count = self.cursor.fetchone()[0]
+            task_count: int = self.cursor.fetchone()[0]
 
-        stats_text = f"""Total Projects: {project_count}
+        stats_text: str = f"""Total Projects: {project_count}
 Messages: {message_count}
 Active Tasks: {task_count}
 
@@ -800,8 +820,8 @@ Team formed: {datetime.now().strftime('%Y-%m-%d')}
 """
 
         self.stats_label.config(text=stats_text)
-    
-    def update_insights_display(self):
+
+    def update_insights_display(self) -> None:
         """Update insights display"""
         self.insights_display.config(state=tk.NORMAL)
         self.insights_display.delete("1.0", tk.END)
@@ -814,25 +834,25 @@ Team formed: {datetime.now().strftime('%Y-%m-%d')}
                     ORDER BY timestamp DESC LIMIT 5
                 ''', (self.current_project_id,))
 
-                insights = self.cursor.fetchall()
+                insights: List[Tuple[str, str]] = self.cursor.fetchall()
 
             for content, timestamp in insights:
-                time_str = datetime.fromisoformat(timestamp).strftime("%m/%d %H:%M")
+                time_str: str = datetime.fromisoformat(timestamp).strftime("%m/%d %H:%M")
                 self.insights_display.insert(tk.END, f"[{time_str}]\n{content}\n\n")
 
         self.insights_display.config(state=tk.DISABLED)
-    
-    def update_status(self, message):
+
+    def update_status(self, message: str) -> None:
         """Update status bar"""
         self.status_bar.config(text=message)
         self.root.update_idletasks()
-    
-    def load_initial_state(self):
+
+    def load_initial_state(self) -> None:
         """Load initial state on app start"""
         # Check if there are any projects
         with self.db_lock:
             self.cursor.execute('SELECT id FROM projects ORDER BY last_activity DESC LIMIT 1')
-            result = self.cursor.fetchone()
+            result: Optional[Tuple[int]] = self.cursor.fetchone()
 
         if result:
             self.current_project_id = result[0]
@@ -847,10 +867,10 @@ Team formed: {datetime.now().strftime('%Y-%m-%d')}
                     "Let's create your first project and meet your AI team members:\n" +
                     "✨ Spark (Motivator) and 🎯 Proto (Executor)\n\n" +
                     "Together, the three of you will build something amazing!")
-    
-    def open_settings(self):
+
+    def open_settings(self) -> None:
         """Open settings dialog"""
-        dialog = tk.Toplevel(self.root)
+        dialog: tk.Toplevel = tk.Toplevel(self.root)
         dialog.title("Settings")
         dialog.geometry("500x300")
         dialog.transient(self.root)
@@ -874,9 +894,9 @@ Team formed: {datetime.now().strftime('%Y-%m-%d')}
                                    values=["claude-sonnet-4-5-20250929", "claude-opus-4-5-20250929"])
         model_combo.pack(padx=10, fill=tk.X)
         
-        def save_settings():
-            api_key = api_key_entry.get().strip()
-            model = model_var.get()
+        def save_settings() -> None:
+            api_key: str = api_key_entry.get().strip()
+            model: str = model_var.get()
             
             self.config["anthropic_api_key"] = api_key
             self.config["model"] = model
@@ -893,10 +913,10 @@ Team formed: {datetime.now().strftime('%Y-%m-%d')}
         
         ttk.Button(button_frame, text="Save", command=save_settings).pack(side=tk.LEFT, padx=5)
         ttk.Button(button_frame, text="Cancel", command=dialog.destroy).pack(side=tk.LEFT, padx=5)
-    
-    def show_all_projects(self):
+
+    def show_all_projects(self) -> None:
         """Show all projects window"""
-        dialog = tk.Toplevel(self.root)
+        dialog: tk.Toplevel = tk.Toplevel(self.root)
         dialog.title("All Projects")
         dialog.geometry("700x500")
         dialog.transient(self.root)
@@ -919,17 +939,22 @@ Team formed: {datetime.now().strftime('%Y-%m-%d')}
                 ORDER BY last_activity DESC
             ''')
 
-            rows = self.cursor.fetchall()
+            rows: List[Tuple[Any, ...]] = self.cursor.fetchall()
 
         for row in rows:
+            pid: int
+            title: str
+            status: str
+            created: str
+            last_activity: str
             pid, title, status, created, last_activity = row
             tree.insert("", tk.END, values=(title, status, created[:10], last_activity[:10]))
-        
+
         ttk.Button(dialog, text="Close", command=dialog.destroy).pack(pady=10)
-    
-    def show_insights(self):
+
+    def show_insights(self) -> None:
         """Show insights window"""
-        dialog = tk.Toplevel(self.root)
+        dialog: tk.Toplevel = tk.Toplevel(self.root)
         dialog.title("Insights")
         dialog.geometry("600x400")
         dialog.transient(self.root)
@@ -946,15 +971,15 @@ Team formed: {datetime.now().strftime('%Y-%m-%d')}
                 LIMIT 50
             ''')
 
-            insights = self.cursor.fetchall()
+            insights: List[Tuple[str, str, str]] = self.cursor.fetchall()
 
         for content, timestamp, itype in insights:
-            time_str = datetime.fromisoformat(timestamp).strftime("%Y-%m-%d %H:%M")
+            time_str: str = datetime.fromisoformat(timestamp).strftime("%Y-%m-%d %H:%M")
             text.insert(tk.END, f"[{time_str}] ({itype})\n{content}\n\n")
-        
+
         ttk.Button(dialog, text="Close", command=dialog.destroy).pack(pady=10)
-    
-    def show_user_guide(self):
+
+    def show_user_guide(self) -> None:
         """Show user guide"""
         messagebox.showinfo("User Guide", 
             "User Guide:\n\n" +
@@ -965,8 +990,8 @@ Team formed: {datetime.now().strftime('%Y-%m-%d')}
             "5. Quick Capture to save your thoughts\n" +
             "6. Use 'What Was I Doing?' when you return\n\n" +
             "Check the full user-guide.md file for detailed instructions!")
-    
-    def show_about(self):
+
+    def show_about(self) -> None:
         """Show about dialog"""
         messagebox.showinfo("About", 
             f"{APP_NAME} v{APP_VERSION}\n\n" +
@@ -976,17 +1001,17 @@ Team formed: {datetime.now().strftime('%Y-%m-%d')}
             "🎯 Proto - The Executor\n\n" +
             "Together, you build amazing things.\n\n" +
             "Powered by Claude API from Anthropic")
-    
-    def on_closing(self):
+
+    def on_closing(self) -> None:
         """Handle app closing"""
         if messagebox.askokcancel("Quit", "Do you want to quit?"):
             self.conn.close()
             self.root.destroy()
 
-def main():
+def main() -> None:
     """Main entry point"""
-    root = tk.Tk()
-    app = ProductivityTrioApp(root)
+    root: tk.Tk = tk.Tk()
+    app: ProductivityTrioApp = ProductivityTrioApp(root)
     root.protocol("WM_DELETE_WINDOW", app.on_closing)
     root.mainloop()
 
